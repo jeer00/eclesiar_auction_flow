@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Eclesiar Auction Flow</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #121212; color: white; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        /* UI Panel Style */
+        .controls { 
+            background: #1e1e1e; 
+            padding: 20px; 
+            border-bottom: 1px solid #333; 
+            display: flex; 
+            gap: 30px; 
+            align-items: center;
+            z-index: 100;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .filter-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+        input[type=range] { width: 180px; cursor: pointer; }
+        .val-display { font-weight: bold; color: #4a90e2; font-family: monospace; }
+
+        #cy { flex-grow: 1; background: #121212; position: relative; }
+        
+        .stats { margin-left: auto; text-align: right; font-size: 12px; color: #888; line-height: 1.4; }
+
+        /* Foldable Header */
+        .info-header {
+            background: #1e1e1e;
+            padding: 10px 20px;
+            border-bottom: 1px solid #333;
+            user-select: none;
+        }
+
+        summary {
+            list-style: none;
+            cursor: pointer;
+            outline: none;
+        }
+        summary::-webkit-details-marker { display: none; }
+
+        summary h1 {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 0;
+            color: #4a90e2;
+            font-size: 18px;
+        }
+
+        .arrow { font-size: 10px; transition: transform 0.3s ease; color: #666; }
+        details[open] .arrow { transform: rotate(180deg); }
+
+        .collapsible-content { padding: 15px 0; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .meta { display: flex; gap: 15px; margin-bottom: 12px; font-size: 12px; color: #888; }
+        .description { font-size: 13px; color: #ccc; line-height: 1.6; max-width: 900px; }
+        .tag { background: #2a2a2a; padding: 2px 8px; border-radius: 4px; border: 1px solid #444; color: #eee; }
+        
+        .legend-mini { 
+            margin-top: 12px; 
+            padding-top: 10px; 
+            border-top: 1px solid #333; 
+            color: #777; 
+            font-size: 12px; 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <div class="filter-group">
+            <label>Min Interaction Strength: <span id="strength-val" class="val-display">0.5</span></label>
+            <input type="range" id="strength-slider" min="0" max="20" step="0.5" value="0.5">
+        </div>
+
+        <div class="filter-group">
+            <label>Min Gold Flow: <span id="flow-val" class="val-display">1</span></label>
+            <input type="range" id="flow-slider" min="0" max="1100" step="10" value="1">
+        </div>
+
+        <div class="stats">
+            <div id="node-count">Nodes: 0</div>
+            <div id="edge-count">Edges: 0</div>
+        </div>
+    </div>
+
+    <div class="info-header">
+        <details open>
+            <summary>
+                <h1>Glitch Gold: Network Investigator <span class="arrow">▼</span></h1>
+            </summary>
+            <div class="collapsible-content">
+                <div class="meta">
+                    <span><strong>Period:</strong> <span class="tag">2025-12-28 — 2025-12-29</span></span>
+                    <span><strong>Status:</strong> <span class="tag" style="color: #e74c3c; border-color: #e74c3c33;">Patched</span></span>
+                    <span><strong>Source:</strong> <span class="tag">Eclesiar Market API</span></span>
+                </div>
+                <div class="description">
+                    This tool visualizes gold movement between users. Circles represent <strong>User IDs</strong>, and arrows show the direction of gold flow. 
+                    The analysis covers the period where an action exploit was active where refunds from overbidding where being overpayed. Note that some legitimate transactions from this timeframe are likely included due to the lack of exact timestamps from bug being introduced to patched. I just went with the 24h i knew it existed. 
+                </div>
+                <div class="legend-mini">
+                    💡 <strong>Quick Guide:</strong> Larger circles = higher total gold received. Thicker lines = more frequent bidding. Red lines = high-value transfers.
+                </div>
+            </div>
+        </details>
+    </div>
+
+    <div id="cy"></div>
+    <script>
+        const rawData = [
+    { source: "202", target: "1593", interaction_strength: 19, total_gold_flow: 29.736 },
+    { source: "202", target: "1450", interaction_strength: 18, total_gold_flow: 25.455 },
+    { source: "16694", target: "9755", interaction_strength: 12, total_gold_flow: 113.55 },
+    { source: "14291", target: "740", interaction_strength: 11, total_gold_flow: 28.955 },
+    { source: "16026", target: "740", interaction_strength: 9, total_gold_flow: 17.593 },
+    { source: "10825", target: "9877", interaction_strength: 8, total_gold_flow: 13.41 },
+    { source: "10825", target: "14739", interaction_strength: 8, total_gold_flow: 8.962 },
+    { source: "16026", target: "16694", interaction_strength: 8, total_gold_flow: 16.399 },
+    { source: "14291", target: "22795", interaction_strength: 7, total_gold_flow: 18.427 },
+    { source: "15685", target: "740", interaction_strength: 7, total_gold_flow: 18.39 },
+    { source: "4523", target: "740", interaction_strength: 6, total_gold_flow: 80.745 },
+    { source: "7792", target: "740", interaction_strength: 6, total_gold_flow: 48.698 },
+    { source: "10825", target: "9227", interaction_strength: 6, total_gold_flow: 15.988 },
+    { source: "16694", target: "321", interaction_strength: 6, total_gold_flow: 56.706 },
+    { source: "16694", target: "24595", interaction_strength: 6, total_gold_flow: 53.0 },
+    { source: "7104", target: "14291", interaction_strength: 5, total_gold_flow: 15.8 },
+    { source: "16026", target: "14739", interaction_strength: 5, total_gold_flow: 6.8 },
+    { source: "20349", target: "9877", interaction_strength: 5, total_gold_flow: 7.3 },
+    { source: "9717", target: "321", interaction_strength: 4, total_gold_flow: 163.049 },
+    { source: "10902", target: "11379", interaction_strength: 4, total_gold_flow: 154.0 },
+    { source: "21148", target: "740", interaction_strength: 4, total_gold_flow: 4.21 },
+    { source: "23725", target: "9877", interaction_strength: 4, total_gold_flow: 4.3 },
+    { source: "282", target: "740", interaction_strength: 3, total_gold_flow: 128.385 },
+    { source: "331", target: "7922", interaction_strength: 3, total_gold_flow: 27.9 },
+    { source: "1908", target: "879", interaction_strength: 3, total_gold_flow: 28.9 },
+    { source: "4523", target: "14739", interaction_strength: 3, total_gold_flow: 54.037 },
+    { source: "4523", target: "22795", interaction_strength: 3, total_gold_flow: 42.229 },
+    { source: "7792", target: "11379", interaction_strength: 3, total_gold_flow: 38.051 },
+    { source: "9717", target: "9755", interaction_strength: 3, total_gold_flow: 121.948 },
+    { source: "13520", target: "14291", interaction_strength: 3, total_gold_flow: 9.0 },
+    { source: "14291", target: "7792", interaction_strength: 3, total_gold_flow: 42.6 },
+    { source: "15685", target: "22795", interaction_strength: 3, total_gold_flow: 8.023 },
+    { source: "20349", target: "11396", interaction_strength: 3, total_gold_flow: 1.8 },
+    { source: "24265", target: "5065", interaction_strength: 3, total_gold_flow: 22.947 },
+    { source: "24614", target: "740", interaction_strength: 3, total_gold_flow: 9.0 },
+    { source: "282", target: "9787", interaction_strength: 2, total_gold_flow: 105.127 },
+    { source: "441", target: "3252", interaction_strength: 2, total_gold_flow: 90.0 },
+    { source: "441", target: "7474", interaction_strength: 2, total_gold_flow: 5.523 },
+    { source: "1908", target: "3252", interaction_strength: 2, total_gold_flow: 57.8 },
+    { source: "3252", target: "9986", interaction_strength: 2, total_gold_flow: 1051.252 },
+    { source: "3480", target: "5065", interaction_strength: 2, total_gold_flow: 7.352 },
+    { source: "3480", target: "20330", interaction_strength: 2, total_gold_flow: 7.0 },
+    { source: "4579", target: "24595", interaction_strength: 2, total_gold_flow: 145.0 },
+    { source: "10210", target: "9755", interaction_strength: 2, total_gold_flow: 6.628 },
+    { source: "11980", target: "9986", interaction_strength: 2, total_gold_flow: 94.615 },
+    { source: "12499", target: "9986", interaction_strength: 2, total_gold_flow: 67.282 },
+    { source: "13641", target: "9986", interaction_strength: 2, total_gold_flow: 17.663 },
+    { source: "13775", target: "9array1992", interaction_strength: 2, total_gold_flow: 7.5 },
+    { source: "23809", target: "9755", interaction_strength: 2, total_gold_flow: 9.068 },
+    { source: "24265", target: "11880", interaction_strength: 2, total_gold_flow: 14.5 },
+    { source: "24265", target: "22356", interaction_strength: 2, total_gold_flow: 14.0 },
+    { source: "202", target: "15241", interaction_strength: 1, total_gold_flow: 0.5 },
+    { source: "331", target: "57", interaction_strength: 1, total_gold_flow: 9.0 },
+    { source: "441", target: "57", interaction_strength: 1, total_gold_flow: 47.251 },
+    { source: "441", target: "5552", interaction_strength: 1, total_gold_flow: 2.5 },
+    { source: "441", target: "11823", interaction_strength: 1, total_gold_flow: 2.758 },
+    { source: "740", target: "2508", interaction_strength: 1, total_gold_flow: 63.001 },
+    { source: "740", target: "22795", interaction_strength: 1, total_gold_flow: 60.0 },
+    { source: "1693", target: "24595", interaction_strength: 1, total_gold_flow: 44.0 },
+    { source: "1908", target: "10825", interaction_strength: 1, total_gold_flow: 24.0 },
+    { source: "1908", target: "22973", interaction_strength: 1, total_gold_flow: 25.0 },
+    { source: "2286", target: "9788", interaction_strength: 1, total_gold_flow: 430.0 },
+    { source: "3252", target: "3481", interaction_strength: 1, total_gold_flow: 525.001 },
+    { source: "3480", target: "13780", interaction_strength: 1, total_gold_flow: 1.0 },
+    { source: "3481", target: "879", interaction_strength: 1, total_gold_flow: 9.8 },
+    { source: "3620", target: "9787", interaction_strength: 1, total_gold_flow: 68.0 },
+    { source: "4523", target: "9755", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "4523", target: "16694", interaction_strength: 1, total_gold_flow: 9.728 },
+    { source: "4579", target: "740", interaction_strength: 1, total_gold_flow: 60.0 },
+    { source: "4750", target: "3252", interaction_strength: 1, total_gold_flow: 330.0 },
+    { source: "5270", target: "321", interaction_strength: 1, total_gold_flow: 10.0 },
+    { source: "5270", target: "12499", interaction_strength: 1, total_gold_flow: 8.6 },
+    { source: "6054", target: "323", interaction_strength: 1, total_gold_flow: 600.0 },
+    { source: "6075", target: "22973", interaction_strength: 1, total_gold_flow: 19.0 },
+    { source: "6549", target: "3252", interaction_strength: 1, total_gold_flow: 399.0 },
+    { source: "7018", target: "740", interaction_strength: 1, total_gold_flow: 2.0 },
+    { source: "7104", target: "12486", interaction_strength: 1, total_gold_flow: 205.0 },
+    { source: "7212", target: "7377", interaction_strength: 1, total_gold_flow: 4.0 },
+    { source: "7792", target: "10699", interaction_strength: 1, total_gold_flow: 11.579 },
+    { source: "7792", target: "20887", interaction_strength: 1, total_gold_flow: 12.768 },
+    { source: "7792", target: "22795", interaction_strength: 1, total_gold_flow: 10.501 },
+    { source: "7922", target: "706", interaction_strength: 1, total_gold_flow: 20.0 },
+    { source: "7922", target: "3620", interaction_strength: 1, total_gold_flow: 21.001 },
+    { source: "9227", target: "740", interaction_strength: 1, total_gold_flow: 2.28 },
+    { source: "9227", target: "22795", interaction_strength: 1, total_gold_flow: 2.17 },
+    { source: "9562", target: "3252", interaction_strength: 1, total_gold_flow: 33.0 },
+    { source: "9709", target: "740", interaction_strength: 1, total_gold_flow: 16.8 },
+    { source: "9716", target: "879", interaction_strength: 1, total_gold_flow: 9.0 },
+    { source: "10210", target: "282", interaction_strength: 1, total_gold_flow: 3.0 },
+    { source: "10210", target: "321", interaction_strength: 1, total_gold_flow: 3.652 },
+    { source: "10210", target: "5065", interaction_strength: 1, total_gold_flow: 3.836 },
+    { source: "10210", target: "10902", interaction_strength: 1, total_gold_flow: 3.31 },
+    { source: "10210", target: "13520", interaction_strength: 1, total_gold_flow: 4.029 },
+    { source: "10684", target: "1810", interaction_strength: 1, total_gold_flow: 1.105 },
+    { source: "10684", target: "9755", interaction_strength: 1, total_gold_flow: 1.051 },
+    { source: "10684", target: "9986", interaction_strength: 1, total_gold_flow: 1.0 },
+    { source: "10787", target: "349", interaction_strength: 1, total_gold_flow: 13.0 },
+    { source: "10902", target: "5065", interaction_strength: 1, total_gold_flow: 36.751 },
+    { source: "11100", target: "203", interaction_strength: 1, total_gold_flow: 20.0 },
+    { source: "11100", target: "9755", interaction_strength: 1, total_gold_flow: 9.0 },
+    { source: "11396", target: "5065", interaction_strength: 1, total_gold_flow: 7.0 },
+    { source: "11517", target: "321", interaction_strength: 1, total_gold_flow: 8.5 },
+    { source: "11517", target: "3252", interaction_strength: 1, total_gold_flow: 199.0 },
+    { source: "11517", target: "7922", interaction_strength: 1, total_gold_flow: 8.926 },
+    { source: "11823", target: "1594", interaction_strength: 1, total_gold_flow: 48.0 },
+    { source: "11823", target: "7474", interaction_strength: 1, total_gold_flow: 8.4 },
+    { source: "11920", target: "5149", interaction_strength: 1, total_gold_flow: 7.5 },
+    { source: "11980", target: "57", interaction_strength: 1, total_gold_flow: 10.5 },
+    { source: "11980", target: "11880", interaction_strength: 1, total_gold_flow: 47.251 },
+    { source: "12031", target: "10825", interaction_strength: 1, total_gold_flow: 18.0 },
+    { source: "12499", target: "11880", interaction_strength: 1, total_gold_flow: 33.601 },
+    { source: "12499", target: "14739", interaction_strength: 1, total_gold_flow: 7.351 },
+    { source: "12499", target: "16694", interaction_strength: 1, total_gold_flow: 7.0 },
+    { source: "12515", target: "23809", interaction_strength: 1, total_gold_flow: 11.0 },
+    { source: "12987", target: "7474", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "12987", target: "23041", interaction_strength: 1, total_gold_flow: 8.401 },
+    { source: "13520", target: "11992", interaction_strength: 1, total_gold_flow: 1.5 },
+    { source: "13641", target: "12499", interaction_strength: 1, total_gold_flow: 8.821 },
+    { source: "13775", target: "11880", interaction_strength: 1, total_gold_flow: 48.301 },
+    { source: "13780", target: "321", interaction_strength: 1, total_gold_flow: 10.0 },
+    { source: "13780", target: "24595", interaction_strength: 1, total_gold_flow: 80.0 },
+    { source: "14250", target: "14291", interaction_strength: 1, total_gold_flow: 2.5 },
+    { source: "14317", target: "321", interaction_strength: 1, total_gold_flow: 8.88 },
+    { source: "14317", target: "1550", interaction_strength: 1, total_gold_flow: 7.99 },
+    { source: "14317", target: "12616", interaction_strength: 1, total_gold_flow: 8.1 },
+    { source: "14518", target: "5149", interaction_strength: 1, total_gold_flow: 40.0 },
+    { source: "14518", target: "9755", interaction_strength: 1, total_gold_flow: 42.001 },
+    { source: "14739", target: "740", interaction_strength: 1, total_gold_flow: 15.751 },
+    { source: "14739", target: "10699", interaction_strength: 1, total_gold_flow: 15.0 },
+    { source: "14739", target: "12616", interaction_strength: 1, total_gold_flow: 47.5 },
+    { source: "15150", target: "22973", interaction_strength: 1, total_gold_flow: 30.0 },
+    { source: "15685", target: "13780", interaction_strength: 1, total_gold_flow: 2.558 },
+    { source: "16026", target: "9755", interaction_strength: 1, total_gold_flow: 1.0 },
+    { source: "16307", target: "9705", interaction_strength: 1, total_gold_flow: 40.0 },
+    { source: "16694", target: "24113", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "17848", target: "740", interaction_strength: 1, total_gold_flow: 16.0 },
+    { source: "19029", target: "3252", interaction_strength: 1, total_gold_flow: 8.401 },
+    { source: "19029", target: "9755", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "19697", target: "20442", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "20330", target: "740", interaction_strength: 1, total_gold_flow: 3.0 },
+    { source: "20330", target: "9877", interaction_strength: 1, total_gold_flow: 25.0 },
+    { source: "23041", target: "203", interaction_strength: 1, total_gold_flow: 15.751 },
+    { source: "23041", target: "706", interaction_strength: 1, total_gold_flow: 15.0 },
+    { source: "23041", target: "12030", interaction_strength: 1, total_gold_flow: 39.0 },
+    { source: "23152", target: "5065", interaction_strength: 1, total_gold_flow: 5.0 },
+    { source: "23809", target: "1516", interaction_strength: 1, total_gold_flow: 25.0 },
+    { source: "23809", target: "3280", interaction_strength: 1, total_gold_flow: 4.634 },
+    { source: "23809", target: "5065", interaction_strength: 1, total_gold_flow: 27.565 },
+    { source: "23809", target: "9819", interaction_strength: 1, total_gold_flow: 4.0 },
+    { source: "23809", target: "9877", interaction_strength: 1, total_gold_flow: 26.251 },
+    { source: "23809", target: "12499", interaction_strength: 1, total_gold_flow: 4.412 },
+    { source: "23809", target: "23041", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "24104", target: "5149", interaction_strength: 1, total_gold_flow: 7.876 },
+    { source: "24104", target: "19335", interaction_strength: 1, total_gold_flow: 7.5 },
+    { source: "24104", target: "23809", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "24202", target: "202", interaction_strength: 1, total_gold_flow: 8.401 },
+    { source: "24202", target: "9986", interaction_strength: 1, total_gold_flow: 8.0 },
+    { source: "24265", target: "9755", interaction_strength: 1, total_gold_flow: 7.351 },
+    { source: "24614", target: "321", interaction_strength: 1, total_gold_flow: 7.0 },
+    { source: "24636", target: "11992", interaction_strength: 1, total_gold_flow: 4.5 },
+    { source: "24636", target: "20644", interaction_strength: 1, total_gold_flow: 4.726 }
+];
+
+let cy;
+
+        function updateGraph() {
+            const minStrength = parseFloat(document.getElementById('strength-slider').value);
+            const minFlow = parseFloat(document.getElementById('flow-slider').value);
+
+            document.getElementById('strength-val').innerText = minStrength;
+            document.getElementById('flow-val').innerText = minFlow.toFixed(1);
+
+            const filtered = rawData.filter(d => 
+                d.interaction_strength >= minStrength && 
+                d.total_gold_flow >= minFlow
+            );
+
+            const nodesMap = new Map();
+            const edges = [];
+
+            filtered.forEach(d => {
+                if (!nodesMap.has(d.source)) nodesMap.set(d.source, { id: d.source, weight: 0 });
+                if (!nodesMap.has(d.target)) nodesMap.set(d.target, { id: d.target, weight: 0 });
+                nodesMap.get(d.target).weight += d.total_gold_flow;
+                
+                edges.push({
+                    data: { source: d.source, target: d.target, weight: d.interaction_strength, flow: d.total_gold_flow }
+                });
+            });
+
+            const elements = [
+                ...Array.from(nodesMap.values()).map(n => ({
+                    data: { id: n.id, size: Math.max(25, Math.log10(n.weight + 1) * 35) }
+                })),
+                ...edges
+            ];
+
+            document.getElementById('node-count').innerText = `Nodes: ${nodesMap.size}`;
+            document.getElementById('edge-count').innerText = `Edges: ${edges.length}`;
+
+            if (cy) cy.destroy();
+
+            cy = cytoscape({
+                container: document.getElementById('cy'),
+                elements: elements,
+                style: [
+                    {
+                        selector: 'node',
+                        style: {
+                            'background-color': '#4a90e2',
+                            'label': 'data(id)',
+                            'width': 'data(size)',
+                            'height': 'data(size)',
+                            'color': '#fff',
+                            'font-size': '10px',
+                            'text-valign': 'center',
+                            'text-halign': 'center'
+                        }
+                    },
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 'mapData(weight, 1, 20, 1, 10)',
+                            'line-color': 'mapData(flow, 1, 500, #2ecc71, #e74c3c)',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(flow)',
+                            'font-size': '8px',
+                            'color': '#aaa',
+                            'opacity': 0.7,
+                            'target-arrow-color': '#555'
+                        }
+                    }
+                ],
+                layout: { name: 'cose', animate: true, nodeRepulsion: 12000 }
+            });
+        }
+
+        document.getElementById('strength-slider').addEventListener('input', updateGraph);
+        document.getElementById('flow-slider').addEventListener('input', updateGraph);
+
+        updateGraph();
+    </script>
+</body>
+</html>
